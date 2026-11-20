@@ -1,6 +1,7 @@
 {
   "name": "課題管理アプリ",
   "short_name": "課題管理",
+  "id": "/-/",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
