@@ -1,4 +1,79 @@
+// Firebaseの機能を読み込む
+import { initializeApp } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-app.js";
 
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  onAuthStateChanged,
+  signOut
+} from "https://www.gstatic.com/firebasejs/13.4.0/firebase-auth.js";
+
+import {
+  getFirestore,
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  getDocs
+} from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
+// Firebaseの設定
+const firebaseConfig = {
+  apiKey: "Firebase画面に表示されたAPIキー",
+  authDomain: "assignment-management-ap-939da.firebaseapp.com",
+  projectId: "assignment-management-ap-939da",
+  storageBucket: "assignment-management-ap-939da.firebasestorage.app",
+  messagingSenderId: "1073181301145",
+  appId: "1:1073181301145:web:3899defdd318dae3c1db08"
+};
+
+// Firebaseを初期化
+const app = initializeApp(firebaseConfig);
+
+// Google認証を準備
+const auth = getAuth(app);
+const provider = new GoogleAuthProvider();
+
+// Firestoreを準備
+const db = getFirestore(app);
+// ログイン画面の要素を取得
+const loginButton = document.getElementById("login-button");
+const logoutButton = document.getElementById("logout-button");
+const userStatus = document.getElementById("user-status");
+
+// Googleログイン
+loginButton.addEventListener("click", async () => {
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (error) {
+    console.error("ログインエラー:", error);
+    alert("ログインできませんでした。");
+  }
+});
+
+// ログアウト
+logoutButton.addEventListener("click", async () => {
+  try {
+    await signOut(auth);
+  } catch (error) {
+    console.error("ログアウトエラー:", error);
+    alert("ログアウトできませんでした。");
+  }
+});
+
+// ログイン状態を確認
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    userStatus.textContent = user.displayName + " でログイン中";
+    loginButton.style.display = "none";
+    logoutButton.style.display = "inline-block";
+  } else {
+    userStatus.textContent = "ログインしていません";
+    loginButton.style.display = "inline-block";
+    logoutButton.style.display = "none";
+  }
+});
 // 保存されている課題を読み込む
 let tasks = [];
 
