@@ -7,11 +7,16 @@
   <title>課題管理アプリ</title>
   <link rel="stylesheet" href="style.css">
 
- <link rel="manifest" href="manifest.json?v=2">
+  <link rel="manifest" href="manifest.json?v=2">
   <meta name="theme-color" content="#16a34a">
   <link rel="apple-touch-icon" href="icon-192.png">
 </head>
 <body>
+<div id="login-area">
+  <p id="user-status">ログインしていません</p>
+  <button id="login-button">Googleでログイン</button>
+  <button id="logout-button" style="display: none;">ログアウト</button>
+</div>
   <header>
     <h1>課題管理アプリ</h1>
     <p>課題の提出忘れを防ごう</p>
@@ -98,6 +103,6 @@
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="script.js"></script>
+  <script type="module" src="script.js"></script>
 </body>
 </html>
