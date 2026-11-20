@@ -1,0 +1,103 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>課題管理アプリ</title>
+  <link rel="stylesheet" href="style.css">
+
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#16a34a">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+</head>
+<body>
+  <header>
+    <h1>課題管理アプリ</h1>
+    <p>課題の提出忘れを防ごう</p>
+  </header>
+
+  <main>
+    <section class="summary">
+      <div class="summary-card">
+        <span id="remaining-count">0</span>
+        <p>未提出</p>
+      </div>
+      <div class="summary-card">
+        <span id="tomorrow-count">0</span>
+        <p>明日まで</p>
+      </div>
+      <div class="summary-card">
+        <span id="completed-count">0</span>
+        <p>提出済み</p>
+      </div>
+    </section>
+
+    <section class="task-section">
+      <h2>課題一覧</h2>
+      <div id="task-list">
+        <p>まだ課題は登録されていません。</p>
+      </div>
+    </section>
+
+    <section class="add-section">
+      <h2>課題を追加</h2>
+      <form id="task-form">
+        <label for="task-name">課題名</label>
+        <input type="text" id="task-name" required>
+
+        <label for="class-name">授業名</label>
+        <input type="text" id="class-name">
+
+        <label for="due-date">締め切り</label>
+        <input type="date" id="due-date" required>
+
+        <button type="submit">課題を登録する</button>
+      </form>
+    </section>
+
+    <section class="photo-section">
+      <h2>写真から課題を登録</h2>
+
+      <label for="task-image">課題の写真を選択</label>
+      <input type="file" id="task-image" accept="image/*">
+
+      <div id="image-preview"></div>
+
+      <button type="button" id="read-image">
+        写真を読み取る
+      </button>
+
+      <p id="ocr-status"></p>
+
+      <label for="ocr-result">読み取った文字</label>
+      <textarea
+        id="ocr-result"
+        rows="8"
+        placeholder="読み取った文字がここに表示されます"
+        readonly
+      ></textarea>
+
+      <div id="ocr-confirm" hidden>
+        <h3>読み取り内容の確認</h3>
+
+        <label for="ocr-task-name">課題名</label>
+        <input type="text" id="ocr-task-name">
+
+        <label for="ocr-class-name">授業名</label>
+        <input type="text" id="ocr-class-name">
+
+        <label for="ocr-due-date">提出期限</label>
+        <input type="datetime-local" id="ocr-due-date">
+
+        <button type="button" id="ocr-register">
+          この内容で登録
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
