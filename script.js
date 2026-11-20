@@ -20,7 +20,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
 // Firebaseの設定
 const firebaseConfig = {
-  apiKey: "Firebase画面に表示されたAPIキー",
+  apiKey: "AIzaSyCOIK6ttm3Icp-ggKujebiHk21abig8mFw",
   authDomain: "assignment-management-ap-939da.firebaseapp.com",
   projectId: "assignment-management-ap-939da",
   storageBucket: "assignment-management-ap-939da.firebasestorage.app",
