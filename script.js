@@ -63,13 +63,19 @@ logoutButton.addEventListener("click", async () => {
 });
 
 // ログイン状態を確認
-onAuthStateChanged(auth, (user) => {
+onAuthStateChanged(auth, async (user) => {
   if (user) {
     userStatus.textContent = user.displayName + " でログイン中";
     loginButton.style.display = "none";
     logoutButton.style.display = "inline-block";
-  } else {
-    userStatus.textContent = "ログインしていません";
+
+    // Firestoreから課題を読み込む
+    startTasksSync();
+
+ if (unsubscribeTasks) {
+  unsubscribeTasks();
+  unsubscribeTasks = null;
+}
     loginButton.style.display = "inline-block";
     logoutButton.style.display = "none";
   }
@@ -84,8 +90,93 @@ try {
 }
 
 // 課題を保存する関数
+// 課題を保存する関数
 function saveTasks() {
+  // 今まで通り、端末にも保存する
   localStorage.setItem("tasks", JSON.stringify(tasks));
+
+  // ログインしている場合はFirestoreにも保存する
+  if (auth.currentUser) {
+    saveTasksToFirestore();
+  }
+}
+
+// 課題を保存する関数
+function saveTasks() {
+  // 端末にも保存する
+  localStorage.setItem("tasks", JSON.stringify(tasks));
+
+  // ログイン中ならFirestoreにも保存する
+  if (auth.currentUser) {
+    saveTasksToFirestore();
+  }
+}
+
+// Firestoreに課題を保存する
+async function saveTasksToFirestore() {
+  try {
+    const userId = auth.currentUser.uid;
+
+    for (const task of tasks) {
+      await setDoc(
+        doc(db, "users", userId, "tasks", String(task.id)),
+        task
+      );
+    }
+
+    console.log("Firestoreへの保存に成功しました");
+  } catch (error) {
+    console.error("Firestore保存エラー:", error);
+  }
+}
+
+// Firestoreから課題を削除する
+async function deleteTaskFromFirestore(taskId) {
+  try {
+    if (!auth.currentUser) return;
+
+    const userId = auth.currentUser.uid;
+
+    await deleteDoc(
+      doc(db, "users", userId, "tasks", String(taskId))
+    );
+
+    console.log("Firestoreから課題を削除しました");
+  } catch (error) {
+    console.error("Firestore削除エラー:", error);
+  }
+}
+
+// Firestoreのリアルタイム同期を管理
+let unsubscribeTasks = null;
+
+// Firestoreの変更をリアルタイムで受け取る
+function startTasksSync() {
+  const userId = auth.currentUser.uid;
+
+  // 以前の同期を解除する
+  if (unsubscribeTasks) {
+    unsubscribeTasks();
+  }
+
+  // Firestoreの課題を監視する
+  unsubscribeTasks = onSnapshot(
+    collection(db, "users", userId, "tasks"),
+    (snapshot) => {
+      tasks = snapshot.docs.map(doc => doc.data());
+
+      // 端末にも保存する
+      localStorage.setItem("tasks", JSON.stringify(tasks));
+
+      // 画面を更新する
+      displayTasks();
+
+      console.log("課題を同期しました");
+    },
+    (error) => {
+      console.error("同期エラー:", error);
+    }
+  );
 }
 
 // HTMLの要素を取得
@@ -156,6 +247,8 @@ function displayTasks() {
       tasks = tasks.filter(function(t) {
         return t.id !== task.id;
       });
+
+      deleteTaskFromFirestore(task.id);
 
       saveTasks();
       displayTasks();
