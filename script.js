@@ -534,20 +534,7 @@ const taskText = taskResult.data.text || "";
 
 console.log("課題名専用OCR:", taskText);
 
-// 課題名を取り出す
-const normalizedTaskText = taskText.replace(/\s/g, "");
 
-const labelIndex = normalizedTaskText.indexOf("課題名");
-
-let taskName = "";
-
-if (labelIndex !== -1) {
-  taskName = normalizedTaskText
-    .slice(labelIndex + "課題名".length)
-    .trim();
-} else {
-  taskName = normalizedTaskText;
-}
 
     console.log("課題名専用OCR:", taskText);
     console.log("画像上部OCR:", upperText);
