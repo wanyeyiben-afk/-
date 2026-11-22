@@ -527,6 +527,9 @@ const taskResult = await Tesseract.recognize(
   }
 );
 
+console.log("元画像サイズ:", sourceImage.width, sourceImage.height);
+console.log("切り出し範囲:", cropX, cropY, cropWidth, cropHeight);
+console.log("切り出し後サイズ:", taskCanvas.width, taskCanvas.height);
 const taskText = taskResult.data.text || "";
 
 console.log("課題名専用OCR:", taskText);
