@@ -477,69 +477,74 @@ readButton.addEventListener("click", async function() {
 
     const upperText = upperResult.data.text || "";
 
-    // 課題名の行だけを切り出す
-    // 今回の大学サイトの表の配置に合わせた範囲
-    const taskCanvas = document.createElement("canvas");
+   // 課題名の行だけを切り出す
+const taskCanvas = document.createElement("canvas");
 
-    const cropX = Math.floor(
-      sourceImage.width * 0.245
-    );
+// 画像の2段目を切り出す
+const cropX = 0;
+const cropY = Math.floor(sourceImage.height * 0.114);
+const cropWidth = sourceImage.width;
+const cropHeight = Math.floor(sourceImage.height * 0.108);
 
-    const cropY = Math.floor(
-      sourceImage.height * 0.115
-    );
+// 文字を大きくする
+const taskScale = Math.min(
+  6,
+  5500 / cropWidth
+);
 
-    const cropWidth = Math.floor(
-      sourceImage.width * 0.745
-    );
+taskCanvas.width = Math.round(cropWidth * taskScale);
+taskCanvas.height = Math.round(cropHeight * taskScale);
 
-    const cropHeight = Math.floor(
-      sourceImage.height * 0.13
-    );
+const taskContext = taskCanvas.getContext("2d");
 
-    const taskScale = Math.min(
-      5,
-      5000 / cropWidth
-    );
+taskContext.imageSmoothingEnabled = true;
+taskContext.imageSmoothingQuality = "high";
+taskContext.filter = "grayscale(1) contrast(1.8)";
 
-    taskCanvas.width = Math.round(
-      cropWidth * taskScale
-    );
+taskContext.drawImage(
+  sourceImage,
+  cropX,
+  cropY,
+  cropWidth,
+  cropHeight,
+  0,
+  0,
+  taskCanvas.width,
+  taskCanvas.height
+);
 
-    taskCanvas.height = Math.round(
-      cropHeight * taskScale
-    );
+taskContext.filter = "none";
 
-    const taskContext = taskCanvas.getContext("2d");
+ocrStatus.textContent =
+  "課題名の行を詳しく読み取っています。";
 
-    taskContext.imageSmoothingEnabled = true;
-    taskContext.imageSmoothingQuality = "high";
-    taskContext.filter = "grayscale(1) contrast(1.8)";
+// 1行の文字として認識させる
+const taskResult = await Tesseract.recognize(
+  taskCanvas,
+  "jpn+eng",
+  {
+    tessedit_pageseg_mode: "7"
+  }
+);
 
-    taskContext.drawImage(
-      sourceImage,
-      cropX,
-      cropY,
-      cropWidth,
-      cropHeight,
-      0,
-      0,
-      taskCanvas.width,
-      taskCanvas.height
-    );
+const taskText = taskResult.data.text || "";
 
-    taskContext.filter = "none";
+console.log("課題名専用OCR:", taskText);
 
-    ocrStatus.textContent =
-      "課題名を重点的に読み取っています。";
+// 課題名を取り出す
+const normalizedTaskText = taskText.replace(/\s/g, "");
 
-    // 課題名の部分だけをOCRで読み取る
-    const taskResult = await Tesseract.recognize(
-      taskCanvas,
-      "jpn+eng"
-    );
+const labelIndex = normalizedTaskText.indexOf("課題名");
 
-    const taskText = taskResult.data.text || "";
+let taskName = "";
+
+if (labelIndex !== -1) {
+  taskName = normalizedTaskText
+    .slice(labelIndex + "課題名".length)
+    .trim();
+} else {
+  taskName = normalizedTaskText;
+}
 
     console.log("課題名専用OCR:", taskText);
     console.log("画像上部OCR:", upperText);
