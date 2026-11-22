@@ -397,6 +397,7 @@ const ocrResult = document.getElementById("ocr-result");
 
 // 写真を読み取る処理
 // 写真を読み取る処理
+// 写真を読み取る処理
 readButton.addEventListener("click", async function() {
 
   const file = imageInput.files[0];
@@ -413,165 +414,210 @@ readButton.addEventListener("click", async function() {
   }
 
   readButton.disabled = true;
-  ocrStatus.textContent = "画像を準備しています。";
+  ocrStatus.textContent = "画像を読み込んでいます。";
+
+  let sourceImage = null;
 
   try {
 
-    // 画像を読み込む
-    const sourceImage = await createImageBitmap(file);
+    // 元画像を読み込む
+    sourceImage = await createImageBitmap(file);
 
-    // 画像を拡大する（長辺は最大4500px）
-    const maxSide = Math.max(
-      sourceImage.width,
-      sourceImage.height
+    // まず画像全体を読み取る
+    const fullResult = await Tesseract.recognize(
+      file,
+      "jpn+eng"
     );
 
-    const scale = Math.min(3, 4500 / maxSide);
+    const fullText = fullResult.data.text || "";
 
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(sourceImage.width * scale);
-    canvas.height = Math.round(sourceImage.height * scale);
+    // 画像上部60%を切り出す
+    // 課題グループ・課題名・提出期間がある部分
+    const cropHeight = Math.floor(
+      sourceImage.height * 0.6
+    );
 
-    const context = canvas.getContext("2d");
+    const upperCanvas = document.createElement("canvas");
 
-    // 小さい文字を読み取りやすくする
-    context.filter = "grayscale(1) contrast(1.4)";
+    // 小さい文字を読みやすくするため拡大
+    const scale = Math.min(
+      4,
+      5000 / sourceImage.width
+    );
+
+    upperCanvas.width = Math.round(
+      sourceImage.width * scale
+    );
+
+    upperCanvas.height = Math.round(
+      cropHeight * scale
+    );
+
+    const context = upperCanvas.getContext("2d");
+
+    context.filter = "grayscale(1) contrast(1.5)";
+
     context.drawImage(
       sourceImage,
       0,
       0,
-      canvas.width,
-      canvas.height
+      sourceImage.width,
+      cropHeight,
+      0,
+      0,
+      upperCanvas.width,
+      upperCanvas.height
     );
+
     context.filter = "none";
 
     ocrStatus.textContent =
-      "画像全体の文字を読み取っています。";
+      "課題名と授業名を重点的に読み取っています。";
 
-    // 画像全体を読み取る
-    const result = await Tesseract.recognize(
-      canvas,
+    // 上部だけをもう一度読み取る
+    const upperResult = await Tesseract.recognize(
+      upperCanvas,
       "jpn+eng"
     );
 
-    const fullText = result.data.text || "";
+    const upperText = upperResult.data.text || "";
 
-    // 読み取った全文を表示
-    ocrResult.value = fullText;
+    // 読み取った文章を表示
+    ocrResult.value =
+      "【画像上部の読み取り結果】\n" +
+      upperText +
+      "\n\n【画像全体の読み取り結果】\n" +
+      fullText;
 
-    console.log("OCR読み取り結果:", fullText);
+    console.log("上部OCR:", upperText);
+    console.log("全体OCR:", fullText);
 
-    // 課題名を探す
-    const lines = fullText
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(line => line.length > 0);
+    // OCRの文章から指定項目の値を取り出す
+    function extractField(text, label, nextLabels) {
 
-    let taskName = "";
+      // 空白を除去してラベルを探しやすくする
+      const normalized = text.replace(/\s/g, "");
 
-    const taskLabels = [
-      /課題名[：:]\s*(.+)/,
-      /課題タイトル[：:]\s*(.+)/,
-      /レポート名[：:]\s*(.+)/,
-      /提出物[：:]\s*(.+)/
-    ];
+      const start = normalized.indexOf(label);
 
-    for (const line of lines) {
-      for (const pattern of taskLabels) {
-        const match = line.match(pattern);
+      if (start === -1) {
+        return "";
+      }
 
-        if (match && match[1]) {
-          taskName = match[1].trim();
-          break;
+      let valueStart = start + label.length;
+      let valueEnd = normalized.length;
+
+      // 次の項目名が出てきたら、そこまでを値とする
+      for (const nextLabel of nextLabels) {
+
+        const nextIndex = normalized.indexOf(
+          nextLabel,
+          valueStart
+        );
+
+        if (
+          nextIndex !== -1 &&
+          nextIndex < valueEnd
+        ) {
+          valueEnd = nextIndex;
         }
       }
 
-      if (taskName) break;
+      return normalized
+        .slice(valueStart, valueEnd)
+        .replace(/^[：:]/, "")
+        .trim();
     }
 
-    // 明確なラベルがなければ候補を探す
-    if (!taskName) {
-      const ignoredWords = [
-        "課題提出期間",
-        "提出期限",
-        "提出期間",
-        "提出状況",
-        "提出する",
-        "ダウンロード",
-        "ログアウト",
-        "お知らせ",
-        "授業資料",
-        "トップページ"
-      ];
+    // 課題グループから授業名を取得
+    const classLabels = [
+      "課題名",
+      "課題公開期間",
+      "課題提出期間",
+      "課題内容"
+    ];
 
-      taskName = lines.find(line =>
-        line.length >= 3 &&
-        line.length <= 80 &&
-        !ignoredWords.some(word => line.includes(word)) &&
-        !/20\d{2}[\/年.-]\d{1,2}/.test(line)
-      ) || "";
-    }
-
-    // 授業名を探す
-    let className = "";
-
-    for (const line of lines) {
-      const match = line.match(
-        /(?:授業名|科目名|講義名|科目)[：:]\s*(.+)/
+    const className =
+      extractField(
+        upperText,
+        "課題グループ",
+        classLabels
+      ) ||
+      extractField(
+        fullText,
+        "課題グループ",
+        classLabels
       );
 
-      if (match && match[1]) {
-        className = match[1].trim();
-        break;
-      }
-    }
+    // 課題名を取得
+    const taskLabels = [
+      "課題公開期間",
+      "課題提出期間",
+      "課題内容"
+    ];
 
-    // 提出期限を探す
+    const taskName =
+      extractField(
+        upperText,
+        "課題名",
+        taskLabels
+      ) ||
+      extractField(
+        fullText,
+        "課題名",
+        taskLabels
+      );
+
+    // 課題提出期間だけを取得
+    const periodLabels = [
+      "課題内容",
+      "添付ファイル",
+      "課題提出方法"
+    ];
+
+    const submissionPeriod =
+      extractField(
+        upperText,
+        "課題提出期間",
+        periodLabels
+      ) ||
+      extractField(
+        fullText,
+        "課題提出期間",
+        periodLabels
+      );
+
+    console.log("授業名:", className);
+    console.log("課題名:", taskName);
+    console.log("提出期間:", submissionPeriod);
+
+    // 提出期間から日付と時刻を取り出す
     const dateRegex =
-      /(20\d{2})\s*(?:年|\/|\.|-)\s*(\d{1,2})\s*(?:月|\/|\.|-)\s*(\d{1,2})\s*日?\s*(?:[（(][^）)]*[）)])?\s*(?:(\d{1,2})\s*[:時]\s*(\d{2})\s*分?)?/g;
-
-    // 提出期限に関係する行を優先する
-    const priorityLines = lines.filter(line =>
-      /提出期限|締切|締め切り|課題提出期間|提出期間/.test(line)
-    );
-
-    let dateSearchText = priorityLines.join("\n");
-
-    // 優先行に日付がなければ全文から探す
-    if (!dateSearchText || !dateRegex.test(dateSearchText)) {
-      dateSearchText = fullText;
-    }
-
-    // 正規表現の検索位置をリセット
-    dateRegex.lastIndex = 0;
+      /(20\d{2})\/(\d{1,2})\/(\d{1,2})[^0-9]{0,8}(\d{1,2}):(\d{2})/g;
 
     const dateMatches = [
-      ...dateSearchText.matchAll(dateRegex)
+      ...submissionPeriod.matchAll(dateRegex)
     ];
 
     let dueDate = "";
 
-    if (dateMatches.length > 0) {
+    if (dateMatches.length >= 2) {
 
-      // 最後の日付を提出期限の候補にする
-      const match = dateMatches[dateMatches.length - 1];
+      // 2つ目の日付が提出期間の終了日時
+      const match = dateMatches[1];
 
       const year = match[1];
       const month = match[2].padStart(2, "0");
       const day = match[3].padStart(2, "0");
-
-      // 時刻がない場合は23:59を仮設定する
-      const hour = match[4]
-        ? match[4].padStart(2, "0")
-        : "23";
-
-      const minute = match[5] || "59";
+      const hour = match[4].padStart(2, "0");
+      const minute = match[5];
 
       dueDate =
         `${year}-${month}-${day}T${hour}:${minute}`;
+
     }
 
-    // 確認画面に反映する
+    // 確認画面に反映
     document.getElementById("ocr-task-name").value =
       taskName;
 
@@ -583,19 +629,17 @@ readButton.addEventListener("click", async function() {
 
     document.getElementById("ocr-confirm").hidden = false;
 
-    if (!taskName || !dueDate) {
+    if (!taskName || !className || !dueDate) {
+
       ocrStatus.textContent =
-        "読み取りました。空欄の項目は手入力してください。";
+        "一部の項目を読み取れませんでした。確認画面で手入力してください。";
+
     } else {
+
       ocrStatus.textContent =
-        "読み取りが完了しました。登録前に内容を確認してください。";
+        "読み取りが完了しました。内容を確認してください。";
+
     }
-
-    console.log("課題名:", taskName);
-    console.log("授業名:", className);
-    console.log("提出期限:", dueDate);
-
-    sourceImage.close();
 
   } catch (error) {
 
@@ -605,6 +649,10 @@ readButton.addEventListener("click", async function() {
       "読み取りに失敗しました。もう一度試してください。";
 
   } finally {
+
+    if (sourceImage) {
+      sourceImage.close();
+    }
 
     readButton.disabled = false;
 
