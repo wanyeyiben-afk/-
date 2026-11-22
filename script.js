@@ -395,123 +395,6 @@ const readButton = document.getElementById("read-image");
 const ocrStatus = document.getElementById("ocr-status");
 const ocrResult = document.getElementById("ocr-result");
 
-// OCRで読み取った文章から課題名を探す
-function extractTaskName(text) {
-  const lines = text
-    .split(/\r?\n/)
-    .map(line => line.replace(/\s+/g, " ").trim())
-    .filter(line => line.length > 0);
-
-  const labels = [
-    /課題名[：:]?\s*(.+)/,
-    /課題タイトル[：:]?\s*(.+)/,
-    /レポート名[：:]?\s*(.+)/,
-    /提出物[：:]?\s*(.+)/,
-    /課題[：:]?\s*(.+)/
-  ];
-
-  for (const line of lines) {
-    for (const pattern of labels) {
-      const match = line.match(pattern);
-
-      if (match && match[1]) {
-        return match[1].trim();
-      }
-    }
-  }
-
-  // 課題名のラベルがない場合は、
-  // 日付や操作案内ではない行を候補にする
-  const ignoredWords = [
-    "課題提出期間",
-    "提出期限",
-    "提出期間",
-    "提出状況",
-    "提出する",
-    "ダウンロード",
-    "ログアウト",
-    "お知らせ",
-    "授業資料",
-    "トップページ"
-  ];
-
-  const candidate = lines.find(line =>
-    line.length >= 3 &&
-    line.length <= 80 &&
-    !ignoredWords.some(word => line.includes(word)) &&
-    !/\d{4}[\/年.-]\d{1,2}/.test(line)
-  );
-
-  return candidate || "";
-}
-
-
-// 授業名を探す
-function extractClassName(text) {
-  const lines = text.split(/\r?\n/);
-
-  for (const line of lines) {
-    const match = line.match(
-      /(?:授業名|科目名|講義名|科目)[：: ]*(.+)/
-    );
-
-    if (match && match[1]) {
-      return match[1].trim();
-    }
-  }
-
-  return "";
-}
-
-
-// 日付を探す
-function extractDueDate(text) {
-  const lines = text.split(/\r?\n/);
-
-  const dateRegex =
-    /(20\d{2})\s*[\/年.-]\s*(\d{1,2})\s*[\/月.-]\s*(\d{1,2})\s*日?\s*(?:[（(][^）)]*[）)])?\s*(\d{1,2})?\s*[:時]\s*(\d{2})?\s*分?/g;
-
-  // 提出期限に関係する行を優先する
-  const priorityLines = lines.filter(line =>
-    /提出期限|締切|締め切り|課題提出期間|提出期間/.test(line)
-  );
-
-  const otherLines = lines.filter(line =>
-    !priorityLines.includes(line)
-  );
-
-  const searchText = [
-    ...priorityLines,
-    ...otherLines
-  ].join("\n");
-
-  const matches = [...searchText.matchAll(dateRegex)];
-
-  if (matches.length === 0) {
-    return "";
-  }
-
-  // 提出期間が書かれている場合は最後の日付を採用する
-  const match = matches[matches.length - 1];
-
-  const year = match[1];
-  const month = match[2].padStart(2, "0");
-  const day = match[3].padStart(2, "0");
-
-  // 時刻が読み取れた場合はその時刻を使用する
-  // 時刻がない場合は00:00として表示し、確認画面で修正できるようにする
-  const hour = match[4]
-    ? match[4].padStart(2, "0")
-    : "00";
-
-  const minute = match[5]
-    ? match[5]
-    : "00";
-
-  return `${year}-${month}-${day}T${hour}:${minute}`;
-}
-
-
 // 写真を読み取る処理
 readButton.addEventListener("click", async function() {
 
@@ -531,108 +414,140 @@ readButton.addEventListener("click", async function() {
   readButton.disabled = true;
 
   ocrStatus.textContent =
-    "画像を準備しています。";
+    "文字を読み取っています。少しお待ちください。";
 
   try {
 
-    // 画像を読み込む
+    // 画像全体を読み取る
+    const result = await Tesseract.recognize(file, "jpn+eng");
+
+    ocrResult.value = result.data.text;
+
+    // 課題名と提出期限を読み取る
     const sourceImage = await createImageBitmap(file);
 
-    // 小さい文字を読み取りやすくするため画像を拡大する
-    const maxSide = Math.max(
-      sourceImage.width,
-      sourceImage.height
+    // 「課題提出期間」がある行を探す
+    const targetLine = result.data.lines.find(line =>
+      line.text.replace(/\s/g, "").includes("課題提出期間")
     );
 
-    const scale = Math.min(
-      3,
-      4500 / maxSide
-    );
+    if (!targetLine) {
+      throw new Error("課題提出期間の行が見つかりませんでした。");
+    }
 
+    // 該当行の上下を少し広めに切り取る
     const canvas = document.createElement("canvas");
-
-    canvas.width = Math.round(sourceImage.width * scale);
-    canvas.height = Math.round(sourceImage.height * scale);
-
     const context = canvas.getContext("2d");
 
-    // 白黒化とコントラスト調整
-    context.filter = "grayscale(1) contrast(1.5)";
+    const margin = 20;
+    const cropY = Math.max(0, targetLine.bbox.y0 - margin);
+
+    const cropHeight = Math.min(
+      sourceImage.height - cropY,
+      targetLine.bbox.y1 - targetLine.bbox.y0 + margin * 2
+    );
+
+    canvas.width = sourceImage.width * 2;
+    canvas.height = cropHeight * 2;
 
     context.drawImage(
       sourceImage,
+      0,
+      cropY,
+      sourceImage.width,
+      cropHeight,
       0,
       0,
       canvas.width,
       canvas.height
     );
 
-    context.filter = "none";
-
-    ocrStatus.textContent =
-      "画像全体の文字を読み取っています。";
-
-    // 画像全体をOCRで読み取る
-    const result = await Tesseract.recognize(
+    // 切り取った行をもう一度読み取る
+    const headerResult = await Tesseract.recognize(
       canvas,
       "jpn+eng"
     );
 
-    const fullText = result.data.text || "";
+    const headerText = headerResult.data.text;
+    const normalizedText = headerText.replace(/\s/g, "");
 
-    // 読み取った全文を表示
-    ocrResult.value = fullText;
+    console.log("課題名・提出期間の読み取り結果：", headerText);
 
-    console.log("OCR全文:", fullText);
+    // 課題提出期間の位置を探す
+    const label = "課題提出期間";
+    const labelIndex = normalizedText.indexOf(label);
 
-    // 課題名を抽出
-    const taskName = extractTaskName(fullText);
-
-    // 授業名を抽出
-    const className = extractClassName(fullText);
-
-    // 提出期限を抽出
-    const dueDate = extractDueDate(fullText);
-
-    // 確認画面に反映
-    document.getElementById("ocr-task-name").value =
-      taskName;
-
-    document.getElementById("ocr-class-name").value =
-      className;
-
-    document.getElementById("ocr-due-date").value =
-      dueDate;
-
-    // 読み取り結果を確認できるようにする
-    document.getElementById("ocr-confirm").hidden = false;
-
-    if (!taskName || !dueDate) {
-      ocrStatus.textContent =
-        "読み取りました。課題名や提出期限が空欄の場合は、手入力で補ってください。";
-    } else {
-      ocrStatus.textContent =
-        "読み取りが完了しました。内容を確認してください。";
+    if (labelIndex === -1) {
+      throw new Error("課題提出期間を認識できませんでした。");
     }
 
-    console.log("課題名:", taskName);
-    console.log("授業名:", className);
-    console.log("提出期限:", dueDate);
+    // 課題名を取り出す
+    const afterLabel = normalizedText.slice(
+      labelIndex + label.length
+    );
+
+    const dateStart = afterLabel.search(/20\d{2}\/\d{1,2}\/\d{1,2}/);
+
+    let extractedTaskName = "";
+
+    if (dateStart !== -1) {
+      extractedTaskName = afterLabel
+        .slice(0, dateStart)
+        .replace(/[：:]/g, "")
+        .trim();
+    }
+
+    document.getElementById("ocr-task-name").value =
+      extractedTaskName;
+
+    document.getElementById("ocr-class-name").value = "";
+
+    // 提出期間の日付を取り出す
+    const dateRegex =
+      /(20\d{2})\/(\d{1,2})\/(\d{1,2})[（(][^）)]*[）)](\d{1,2}):(\d{2})/g;
+
+    const dateMatches = [...afterLabel.matchAll(dateRegex)];
+
+    console.log("提出期間の日付：", dateMatches);
+
+    if (dateMatches.length >= 2) {
+
+      // 2つ目の日付が提出期間の終了日時
+      const match = dateMatches[1];
+
+      const year = match[1];
+      const month = match[2].padStart(2, "0");
+      const day = match[3].padStart(2, "0");
+      const hour = match[4].padStart(2, "0");
+      const minute = match[5];
+
+      document.getElementById("ocr-due-date").value =
+        `${year}-${month}-${day}T${hour}:${minute}`;
+
+    } else {
+
+      document.getElementById("ocr-due-date").value = "";
+    }
+
+    // 確認画面を表示する
+    document.getElementById("ocr-confirm").hidden = false;
+
+    ocrStatus.textContent =
+      "読み取りが完了しました。内容を確認してください。";
 
   } catch (error) {
 
-    console.error("OCRエラー:", error);
-
     ocrStatus.textContent =
-      "読み取りに失敗しました。画像を確認して、もう一度試してください。";
+      "読み取りに失敗しました。別の写真で試してください。";
+
+    console.error(error);
 
   } finally {
 
     readButton.disabled = false;
-
   }
-
 });
+
 // 写真から読み取った課題を登録する処理
 const ocrRegisterButton = document.getElementById("ocr-register");
 
