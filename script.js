@@ -398,6 +398,7 @@ const ocrResult = document.getElementById("ocr-result");
 // 写真を読み取る処理
 // 写真を読み取る処理
 // 写真を読み取る処理
+// 写真を読み取る処理
 readButton.addEventListener("click", async function() {
 
   const file = imageInput.files[0];
@@ -414,7 +415,7 @@ readButton.addEventListener("click", async function() {
   }
 
   readButton.disabled = true;
-  ocrStatus.textContent = "画像を読み込んでいます。";
+  ocrStatus.textContent = "画像を読み取っています。";
 
   let sourceImage = null;
 
@@ -423,7 +424,7 @@ readButton.addEventListener("click", async function() {
     // 元画像を読み込む
     sourceImage = await createImageBitmap(file);
 
-    // まず画像全体を読み取る
+    // 画像全体を読み取る
     const fullResult = await Tesseract.recognize(
       file,
       "jpn+eng"
@@ -431,50 +432,44 @@ readButton.addEventListener("click", async function() {
 
     const fullText = fullResult.data.text || "";
 
-    // 画像上部60%を切り出す
-    // 課題グループ・課題名・提出期間がある部分
-    const cropHeight = Math.floor(
+    // 画像上部を読み取る
+    const upperHeight = Math.floor(
       sourceImage.height * 0.6
     );
 
     const upperCanvas = document.createElement("canvas");
 
-    // 小さい文字を読みやすくするため拡大
-    const scale = Math.min(
+    const upperScale = Math.min(
       4,
       5000 / sourceImage.width
     );
 
     upperCanvas.width = Math.round(
-      sourceImage.width * scale
+      sourceImage.width * upperScale
     );
 
     upperCanvas.height = Math.round(
-      cropHeight * scale
+      upperHeight * upperScale
     );
 
-    const context = upperCanvas.getContext("2d");
+    const upperContext = upperCanvas.getContext("2d");
 
-    context.filter = "grayscale(1) contrast(1.5)";
+    upperContext.filter = "grayscale(1) contrast(1.5)";
 
-    context.drawImage(
+    upperContext.drawImage(
       sourceImage,
       0,
       0,
       sourceImage.width,
-      cropHeight,
+      upperHeight,
       0,
       0,
       upperCanvas.width,
       upperCanvas.height
     );
 
-    context.filter = "none";
+    upperContext.filter = "none";
 
-    ocrStatus.textContent =
-      "課題名と授業名を重点的に読み取っています。";
-
-    // 上部だけをもう一度読み取る
     const upperResult = await Tesseract.recognize(
       upperCanvas,
       "jpn+eng"
@@ -482,21 +477,83 @@ readButton.addEventListener("click", async function() {
 
     const upperText = upperResult.data.text || "";
 
-    // 読み取った文章を表示
-    ocrResult.value =
-      "【画像上部の読み取り結果】\n" +
-      upperText +
-      "\n\n【画像全体の読み取り結果】\n" +
-      fullText;
+    // 課題名の行だけを切り出す
+    // 今回の大学サイトの表の配置に合わせた範囲
+    const taskCanvas = document.createElement("canvas");
 
-    console.log("上部OCR:", upperText);
-    console.log("全体OCR:", fullText);
+    const cropX = Math.floor(
+      sourceImage.width * 0.245
+    );
 
-    // OCRの文章から指定項目の値を取り出す
+    const cropY = Math.floor(
+      sourceImage.height * 0.115
+    );
+
+    const cropWidth = Math.floor(
+      sourceImage.width * 0.745
+    );
+
+    const cropHeight = Math.floor(
+      sourceImage.height * 0.13
+    );
+
+    const taskScale = Math.min(
+      5,
+      5000 / cropWidth
+    );
+
+    taskCanvas.width = Math.round(
+      cropWidth * taskScale
+    );
+
+    taskCanvas.height = Math.round(
+      cropHeight * taskScale
+    );
+
+    const taskContext = taskCanvas.getContext("2d");
+
+    taskContext.imageSmoothingEnabled = true;
+    taskContext.imageSmoothingQuality = "high";
+    taskContext.filter = "grayscale(1) contrast(1.8)";
+
+    taskContext.drawImage(
+      sourceImage,
+      cropX,
+      cropY,
+      cropWidth,
+      cropHeight,
+      0,
+      0,
+      taskCanvas.width,
+      taskCanvas.height
+    );
+
+    taskContext.filter = "none";
+
+    ocrStatus.textContent =
+      "課題名を重点的に読み取っています。";
+
+    // 課題名の部分だけをOCRで読み取る
+    const taskResult = await Tesseract.recognize(
+      taskCanvas,
+      "jpn+eng"
+    );
+
+    const taskText = taskResult.data.text || "";
+
+    console.log("課題名専用OCR:", taskText);
+    console.log("画像上部OCR:", upperText);
+    console.log("画像全体OCR:", fullText);
+
+    // 空白や改行を除去する
+    function normalizeText(text) {
+      return text.replace(/\s/g, "");
+    }
+
+    // 指定した項目の値を取り出す
     function extractField(text, label, nextLabels) {
 
-      // 空白を除去してラベルを探しやすくする
-      const normalized = text.replace(/\s/g, "");
+      const normalized = normalizeText(text);
 
       const start = normalized.indexOf(label);
 
@@ -504,10 +561,10 @@ readButton.addEventListener("click", async function() {
         return "";
       }
 
-      let valueStart = start + label.length;
+      const valueStart = start + label.length;
+
       let valueEnd = normalized.length;
 
-      // 次の項目名が出てきたら、そこまでを値とする
       for (const nextLabel of nextLabels) {
 
         const nextIndex = normalized.indexOf(
@@ -529,8 +586,8 @@ readButton.addEventListener("click", async function() {
         .trim();
     }
 
-    // 課題グループから授業名を取得
-    const classLabels = [
+    // 授業名を取得
+    const classNextLabels = [
       "課題名",
       "課題公開期間",
       "課題提出期間",
@@ -539,37 +596,45 @@ readButton.addEventListener("click", async function() {
 
     const className =
       extractField(
-        upperText,
-        "課題グループ",
-        classLabels
-      ) ||
-      extractField(
         fullText,
         "課題グループ",
-        classLabels
-      );
-
-    // 課題名を取得
-    const taskLabels = [
-      "課題公開期間",
-      "課題提出期間",
-      "課題内容"
-    ];
-
-    const taskName =
-      extractField(
-        upperText,
-        "課題名",
-        taskLabels
+        classNextLabels
       ) ||
       extractField(
-        fullText,
-        "課題名",
-        taskLabels
+        upperText,
+        "課題グループ",
+        classNextLabels
       );
 
-    // 課題提出期間だけを取得
-    const periodLabels = [
+    // 課題名を専用の読み取り結果から取得
+    let taskName = normalizeText(taskText);
+
+    // 専用OCRで空欄なら、通常の読み取り結果から探す
+    if (!taskName) {
+
+      taskName =
+        extractField(
+          fullText,
+          "課題名",
+          [
+            "課題公開期間",
+            "課題提出期間",
+            "課題内容"
+          ]
+        ) ||
+        extractField(
+          upperText,
+          "課題名",
+          [
+            "課題公開期間",
+            "課題提出期間",
+            "課題内容"
+          ]
+        );
+    }
+
+    // 提出期間を取得
+    const periodNextLabels = [
       "課題内容",
       "添付ファイル",
       "課題提出方法"
@@ -577,23 +642,19 @@ readButton.addEventListener("click", async function() {
 
     const submissionPeriod =
       extractField(
-        upperText,
-        "課題提出期間",
-        periodLabels
-      ) ||
-      extractField(
         fullText,
         "課題提出期間",
-        periodLabels
+        periodNextLabels
+      ) ||
+      extractField(
+        upperText,
+        "課題提出期間",
+        periodNextLabels
       );
 
-    console.log("授業名:", className);
-    console.log("課題名:", taskName);
-    console.log("提出期間:", submissionPeriod);
-
-    // 提出期間から日付と時刻を取り出す
+    // 提出期間の終了日時を取得
     const dateRegex =
-      /(20\d{2})\/(\d{1,2})\/(\d{1,2})[^0-9]{0,8}(\d{1,2}):(\d{2})/g;
+      /(20\d{2})\/(\d{1,2})\/(\d{1,2})[^0-9]{0,12}(\d{1,2}):(\d{2})/g;
 
     const dateMatches = [
       ...submissionPeriod.matchAll(dateRegex)
@@ -603,7 +664,6 @@ readButton.addEventListener("click", async function() {
 
     if (dateMatches.length >= 2) {
 
-      // 2つ目の日付が提出期間の終了日時
       const match = dateMatches[1];
 
       const year = match[1];
@@ -614,10 +674,9 @@ readButton.addEventListener("click", async function() {
 
       dueDate =
         `${year}-${month}-${day}T${hour}:${minute}`;
-
     }
 
-    // 確認画面に反映
+    // 読み取り結果を確認画面に反映
     document.getElementById("ocr-task-name").value =
       taskName;
 
@@ -629,10 +688,19 @@ readButton.addEventListener("click", async function() {
 
     document.getElementById("ocr-confirm").hidden = false;
 
+    // 結果を表示
+    ocrResult.value =
+      "【課題名専用OCR】\n" +
+      taskText +
+      "\n\n【画像上部OCR】\n" +
+      upperText +
+      "\n\n【画像全体OCR】\n" +
+      fullText;
+
     if (!taskName || !className || !dueDate) {
 
       ocrStatus.textContent =
-        "一部の項目を読み取れませんでした。確認画面で手入力してください。";
+        "一部読み取れませんでした。確認画面で修正してください。";
 
     } else {
 
@@ -640,6 +708,10 @@ readButton.addEventListener("click", async function() {
         "読み取りが完了しました。内容を確認してください。";
 
     }
+
+    console.log("授業名:", className);
+    console.log("課題名:", taskName);
+    console.log("提出期限:", dueDate);
 
   } catch (error) {
 
