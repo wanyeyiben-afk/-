@@ -15,9 +15,9 @@ import {
   doc,
   setDoc,
   deleteDoc,
-  onSnapshot,
-  getDocs
+  onSnapshot
 } from "https://www.gstatic.com/firebasejs/13.4.0/firebase-firestore.js";
+
 // Firebaseの設定
 const firebaseConfig = {
   apiKey: "AIzaSyCOIK6ttm3Icp-ggKujebiHk21abig8mFw",
@@ -37,6 +37,10 @@ const provider = new GoogleAuthProvider();
 
 // Firestoreを準備
 const db = getFirestore(app);
+
+// Firestoreのリアルタイム同期を管理
+let unsubscribeTasks = null;
+
 // ログイン画面の要素を取得
 const loginButton = document.getElementById("login-button");
 const logoutButton = document.getElementById("logout-button");
@@ -62,24 +66,6 @@ logoutButton.addEventListener("click", async () => {
   }
 });
 
-// ログイン状態を確認
-onAuthStateChanged(auth, async (user) => {
-  if (user) {
-    userStatus.textContent = user.displayName + " でログイン中";
-    loginButton.style.display = "none";
-    logoutButton.style.display = "inline-block";
-
-    // Firestoreから課題を読み込む
-    startTasksSync();
-
- if (unsubscribeTasks) {
-  unsubscribeTasks();
-  unsubscribeTasks = null;
-}
-    loginButton.style.display = "inline-block";
-    logoutButton.style.display = "none";
-  }
-});
 // 保存されている課題を読み込む
 let tasks = [];
 
@@ -90,23 +76,9 @@ try {
 }
 
 // 課題を保存する関数
-// 課題を保存する関数
 function saveTasks() {
-  // 今まで通り、端末にも保存する
   localStorage.setItem("tasks", JSON.stringify(tasks));
 
-  // ログインしている場合はFirestoreにも保存する
-  if (auth.currentUser) {
-    saveTasksToFirestore();
-  }
-}
-
-// 課題を保存する関数
-function saveTasks() {
-  // 端末にも保存する
-  localStorage.setItem("tasks", JSON.stringify(tasks));
-
-  // ログイン中ならFirestoreにも保存する
   if (auth.currentUser) {
     saveTasksToFirestore();
   }
@@ -115,9 +87,13 @@ function saveTasks() {
 // Firestoreに課題を保存する
 async function saveTasksToFirestore() {
   try {
-    const userId = auth.currentUser.uid;
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
 
-    for (const task of tasks) {
+    const userId = currentUser.uid;
+    const tasksToSave = [...tasks];
+
+    for (const task of tasksToSave) {
       await setDoc(
         doc(db, "users", userId, "tasks", String(task.id)),
         task
@@ -125,6 +101,7 @@ async function saveTasksToFirestore() {
     }
 
     console.log("Firestoreへの保存に成功しました");
+
   } catch (error) {
     console.error("Firestore保存エラー:", error);
   }
@@ -142,16 +119,16 @@ async function deleteTaskFromFirestore(taskId) {
     );
 
     console.log("Firestoreから課題を削除しました");
+
   } catch (error) {
     console.error("Firestore削除エラー:", error);
   }
 }
 
-// Firestoreのリアルタイム同期を管理
-let unsubscribeTasks = null;
-
 // Firestoreの変更をリアルタイムで受け取る
 function startTasksSync() {
+  if (!auth.currentUser) return;
+
   const userId = auth.currentUser.uid;
 
   // 以前の同期を解除する
@@ -160,9 +137,29 @@ function startTasksSync() {
   }
 
   // Firestoreの課題を監視する
+  let isFirstSnapshot = true;
+
   unsubscribeTasks = onSnapshot(
     collection(db, "users", userId, "tasks"),
-    (snapshot) => {
+
+    async (snapshot) => {
+
+      // サーバーからの初回データが届くまでは端末内の課題を維持する
+      if (isFirstSnapshot && snapshot.metadata.fromCache) {
+        displayTasks();
+        return;
+      }
+
+      // 初回ログイン時、クラウド側が空なら端末内の課題を移す
+      if (isFirstSnapshot) {
+        isFirstSnapshot = false;
+
+        if (snapshot.empty && tasks.length > 0) {
+          await saveTasksToFirestore();
+          return;
+        }
+      }
+
       tasks = snapshot.docs.map(doc => doc.data());
 
       // 端末にも保存する
@@ -173,11 +170,40 @@ function startTasksSync() {
 
       console.log("課題を同期しました");
     },
+
     (error) => {
       console.error("同期エラー:", error);
     }
   );
 }
+
+// ログイン状態を確認
+onAuthStateChanged(auth, (user) => {
+
+  if (user) {
+
+    userStatus.textContent = user.displayName + " でログイン中";
+
+    loginButton.style.display = "none";
+    logoutButton.style.display = "inline-block";
+
+    // Firestoreのリアルタイム同期を開始する
+    startTasksSync();
+
+  } else {
+
+    // ログアウトしたらリアルタイム同期を停止する
+    if (unsubscribeTasks) {
+      unsubscribeTasks();
+      unsubscribeTasks = null;
+    }
+
+    userStatus.textContent = "ログインしていません";
+
+    loginButton.style.display = "inline-block";
+    logoutButton.style.display = "none";
+  }
+});
 
 // HTMLの要素を取得
 const taskForm = document.getElementById("task-form");
@@ -185,6 +211,7 @@ const taskList = document.getElementById("task-list");
 
 // 課題を登録する
 taskForm.addEventListener("submit", function(event) {
+
   event.preventDefault();
 
   const name = document.getElementById("task-name").value;
@@ -203,11 +230,13 @@ taskForm.addEventListener("submit", function(event) {
 
   saveTasks();
   displayTasks();
+
   taskForm.reset();
 });
 
 // 課題一覧を表示する
 function displayTasks() {
+
   taskList.innerHTML = "";
 
   const sortedTasks = [...tasks].sort((a, b) => {
@@ -215,6 +244,7 @@ function displayTasks() {
   });
 
   sortedTasks.forEach(function(task) {
+
     const item = document.createElement("div");
     item.className = "task-item";
 
@@ -230,20 +260,26 @@ function displayTasks() {
     const status = document.createElement("p");
     status.textContent = task.completed ? "提出済み" : "未提出";
 
+    // 提出状態変更ボタン
     const completeButton = document.createElement("button");
+
     completeButton.textContent =
       task.completed ? "未提出に戻す" : "提出済みにする";
 
     completeButton.addEventListener("click", function() {
+
       task.completed = !task.completed;
+
       saveTasks();
       displayTasks();
     });
 
+    // 削除ボタン
     const deleteButton = document.createElement("button");
     deleteButton.textContent = "削除";
 
     deleteButton.addEventListener("click", function() {
+
       tasks = tasks.filter(function(t) {
         return t.id !== task.id;
       });
@@ -253,11 +289,13 @@ function displayTasks() {
       saveTasks();
       displayTasks();
     });
-    // 編集ボタンを作る
+
+    // 編集ボタン
     const editButton = document.createElement("button");
     editButton.textContent = "編集";
 
     editButton.addEventListener("click", function() {
+
       const newName = prompt("課題名を入力してください", task.name);
 
       if (newName === null) return;
@@ -293,6 +331,7 @@ function displayTasks() {
       saveTasks();
       displayTasks();
     });
+
     item.appendChild(editButton);
     item.appendChild(title);
     item.appendChild(subject);
@@ -300,7 +339,6 @@ function displayTasks() {
     item.appendChild(status);
     item.appendChild(completeButton);
     item.appendChild(deleteButton);
-    
 
     taskList.appendChild(item);
   });
@@ -334,10 +372,12 @@ function displayTasks() {
 // 最初に保存済みの課題を表示する
 displayTasks();
 
+// 画像選択
 const imageInput = document.getElementById("task-image");
 const imagePreview = document.getElementById("image-preview");
 
 imageInput.addEventListener("change", function() {
+
   imagePreview.innerHTML = "";
 
   const file = imageInput.files[0];
@@ -357,6 +397,7 @@ const ocrResult = document.getElementById("ocr-result");
 
 // 写真を読み取る処理
 readButton.addEventListener("click", async function() {
+
   const file = imageInput.files[0];
 
   if (!file) {
@@ -371,18 +412,18 @@ readButton.addEventListener("click", async function() {
   }
 
   readButton.disabled = true;
+
   ocrStatus.textContent =
     "文字を読み取っています。少しお待ちください。";
 
   try {
+
     // 画像全体を読み取る
     const result = await Tesseract.recognize(file, "jpn+eng");
 
     ocrResult.value = result.data.text;
 
-   
     // 課題名と提出期限を読み取る
-
     const sourceImage = await createImageBitmap(file);
 
     // 「課題提出期間」がある行を探す
@@ -400,6 +441,7 @@ readButton.addEventListener("click", async function() {
 
     const margin = 20;
     const cropY = Math.max(0, targetLine.bbox.y0 - margin);
+
     const cropHeight = Math.min(
       sourceImage.height - cropY,
       targetLine.bbox.y1 - targetLine.bbox.y0 + margin * 2
@@ -469,6 +511,7 @@ readButton.addEventListener("click", async function() {
     console.log("提出期間の日付：", dateMatches);
 
     if (dateMatches.length >= 2) {
+
       // 2つ目の日付が提出期間の終了日時
       const match = dateMatches[1];
 
@@ -482,6 +525,7 @@ readButton.addEventListener("click", async function() {
         `${year}-${month}-${day}T${hour}:${minute}`;
 
     } else {
+
       document.getElementById("ocr-due-date").value = "";
     }
 
@@ -492,21 +536,23 @@ readButton.addEventListener("click", async function() {
       "読み取りが完了しました。内容を確認してください。";
 
   } catch (error) {
+
     ocrStatus.textContent =
       "読み取りに失敗しました。別の写真で試してください。";
 
     console.error(error);
 
   } finally {
+
     readButton.disabled = false;
   }
 });
-
 
 // 写真から読み取った課題を登録する処理
 const ocrRegisterButton = document.getElementById("ocr-register");
 
 ocrRegisterButton.addEventListener("click", function() {
+
   const name = document.getElementById("ocr-task-name").value;
   const className = document.getElementById("ocr-class-name").value;
   const dueDate = document.getElementById("ocr-due-date").value;
@@ -542,13 +588,18 @@ ocrRegisterButton.addEventListener("click", function() {
 
   alert("課題を登録しました。");
 });
+
 // Service Workerを登録する
 if ("serviceWorker" in navigator) {
+
   window.addEventListener("load", () => {
+
     navigator.serviceWorker.register("./service-worker.js")
+
       .then(() => {
         console.log("Service Workerの登録に成功しました");
       })
+
       .catch(error => {
         console.error("Service Workerの登録に失敗しました", error);
       });
